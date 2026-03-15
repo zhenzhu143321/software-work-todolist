@@ -23,11 +23,14 @@
     <!-- Name Input Modal -->
     <div v-if="!nameConfirmed" class="name-modal-overlay">
       <div class="name-modal">
-        <h3>请输入您的姓名</h3>
-        <p>用于标识任务创建人</p>
+        <h3>请输入您的信息</h3>
+        <p>用于标识任务创建人和过滤任务</p>
         <input v-model.trim="creatorName" placeholder="请输入真实姓名"
-               @keydown.enter.prevent="confirmName" ref="nameInputRef" maxlength="20">
-        <button class="btn btn-primary btn-block" @click="confirmName" :disabled="!creatorName">确认</button>
+               @keydown.enter.prevent="$refs.titleInputRef?.focus()" ref="nameInputRef" maxlength="20">
+        <input v-model.trim="creatorTitle" placeholder="请输入职位（如：专业主任、教学副主任）"
+               ref="titleInputRef" @keydown.enter.prevent="confirmName" maxlength="30">
+        <button class="btn btn-primary btn-block" @click="confirmName"
+                :disabled="!creatorName || !creatorTitle">确认</button>
       </div>
     </div>
 
@@ -159,10 +162,11 @@
         const completedTask = ref(null);
         const copyDone = ref(false);
         const creatorName = ref(localStorage.getItem('creatorName') || '');
-        const nameConfirmed = ref(!!localStorage.getItem('creatorName'));
+        const creatorTitle = ref(localStorage.getItem('creatorTitle') || '');
+        const nameConfirmed = ref(!!localStorage.getItem('creatorName') && !!localStorage.getItem('creatorTitle'));
         const nameInputRef = ref(null);
 
-        const steps = ['标题', '描述', '验收标准', '截止日期', '负责人', '优先级', '确认'];
+        const steps = ['类型', '标题', '描述', '验收标准', '截止日期', '负责人', '优先级', '确认'];
 
         // Index of the last AI message (only its options are clickable)
         const lastAiIndex = computed(() => {
@@ -255,8 +259,9 @@
         }
 
         function confirmName() {
-          if (!creatorName.value) return;
+          if (!creatorName.value || !creatorTitle.value) return;
           localStorage.setItem('creatorName', creatorName.value);
+          localStorage.setItem('creatorTitle', creatorTitle.value);
           nameConfirmed.value = true;
           initChat();
         }
@@ -364,7 +369,9 @@
 
             // Attach conversation history (as array, route will stringify)
             taskData.conversation = messages.value;
-            taskData.creator_name = creatorName.value;
+            taskData.creator_name = creatorTitle.value + '-' + creatorName.value;
+            // Ensure task_type is passed through
+            if (!taskData.task_type) taskData.task_type = 'task';
 
             const result = await apiFetch(API_BASE + '/tasks', {
               method: 'POST',
@@ -423,6 +430,7 @@
           copyDone,
           lastAiIndex,
           creatorName,
+          creatorTitle,
           nameConfirmed,
           nameInputRef,
           handleLogout,

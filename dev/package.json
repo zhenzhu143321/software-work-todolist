@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "test:cleanup": "node tests/cleanup-db.js",
+    "test:seed": "node tests/seed-tasks.js",
+    "test:e2e": "npx playwright test",
+    "test:prepare": "node tests/cleanup-db.js && node tests/seed-tasks.js"
   },
   "dependencies": {
     "axios": "^1.13.5",
@@ -15,5 +19,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }
