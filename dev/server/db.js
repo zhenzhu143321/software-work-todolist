@@ -58,12 +58,22 @@ try {
   // Column already exists
 }
 
+// ── Migration: add progress tracking columns ────────────────────────────────
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN progress_note TEXT DEFAULT ''`);
+} catch (e) {
+  // Column already exists
+}
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN progress_percent INTEGER DEFAULT 0`);
+} catch (e) {
+  // Column already exists
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const SALT = process.env.PASSWORD_SALT || '';
-
 function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + SALT).digest('hex');
+  return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 // ── Seed users ──────────────────────────────────────────────────────────────
@@ -93,6 +103,16 @@ const seedTransaction = db.transaction(() => {
 });
 
 seedTransaction();
+
+// Ensure seed user passwords stay in sync with hashPassword()
+const updatePasswordHash = db.prepare(
+  'UPDATE users SET password_hash = ? WHERE username = ?'
+);
+db.transaction(() => {
+  for (const u of seedUsers) {
+    updatePasswordHash.run(hashPassword(u.password), u.username);
+  }
+})();
 
 // ── Prepared statements ─────────────────────────────────────────────────────
 
@@ -165,6 +185,17 @@ export function getAllTasks() {
 }
 
 export function getTaskById(id) {
+  return stmts.getTaskById.get(id);
+}
+
+export function updateTaskStatus(id, { status, progress_note, progress_percent }) {
+  const task = stmts.getTaskById.get(id);
+  if (!task) return null;
+  db.prepare(`
+    UPDATE tasks
+    SET status = ?, progress_note = ?, progress_percent = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(status, progress_note ?? task.progress_note, progress_percent ?? task.progress_percent, id);
   return stmts.getTaskById.get(id);
 }
 

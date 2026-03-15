@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { createTask, getAllTasks, getTaskById } from '../db.js';
+import { createTask, getAllTasks, getTaskById, updateTaskStatus } from '../db.js';
 
 const router = Router();
 
 /**
  * POST /api/tasks
  * Create a new task. Leader role required.
- * Body: { title, description, acceptance_criteria, deadline, priority, assignee_name, conversation }
+ * Body: { title, description, acceptance_criteria, deadline|due_date, priority, assignee_name|assignee, conversation }
  * Returns: { success: true, task_id }
  */
 router.post('/', authenticate, requireRole('leader'), async (req, res) => {
@@ -16,12 +16,18 @@ router.post('/', authenticate, requireRole('leader'), async (req, res) => {
       title,
       description,
       acceptance_criteria,
-      deadline,
+      deadline: _deadline,
+      due_date,
       priority,
-      assignee_name,
+      assignee_name: _assigneeName,
+      assignee,
       creator_name,
       conversation,
     } = req.body;
+
+    // Alias mapping: assignee → assignee_name, due_date → deadline
+    const deadline = _deadline || due_date || null;
+    const assignee_name = _assigneeName || assignee || '';
 
     // Validate required fields
     if (!title || !title.trim()) {
@@ -42,9 +48,9 @@ router.post('/', authenticate, requireRole('leader'), async (req, res) => {
       title: title.trim(),
       description: description || '',
       acceptance_criteria: acceptance_criteria || '',
-      deadline: deadline || null,
+      deadline,
       priority,
-      assignee_name: assignee_name || '',
+      assignee_name,
       creator_name: creator_name || null,
       conversation: conversation ? JSON.stringify(conversation) : null,
       creator_id: req.user.id,
@@ -95,6 +101,51 @@ router.get('/:id', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       error: err.message || '获取任务详情失败',
+    });
+  }
+});
+
+/**
+ * PATCH /api/tasks/:id/status
+ * Update task status and progress. Any authenticated user.
+ * Body: { status, progress_note?, progress_percent? }
+ */
+router.patch('/:id/status', authenticate, async (req, res) => {
+  try {
+    const { status, progress_note, progress_percent } = req.body;
+
+    if (!status || !['in_progress', 'completed'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'status 必须是 in_progress 或 completed',
+      });
+    }
+
+    if (progress_percent !== undefined) {
+      const pct = Number(progress_percent);
+      if (!Number.isInteger(pct) || pct < 0 || pct > 100) {
+        return res.status(400).json({
+          success: false,
+          error: 'progress_percent 必须是 0-100 的整数',
+        });
+      }
+    }
+
+    const task = updateTaskStatus(req.params.id, {
+      status,
+      progress_note: progress_note ?? undefined,
+      progress_percent: progress_percent !== undefined ? Number(progress_percent) : undefined,
+    });
+
+    if (!task) {
+      return res.status(404).json({ success: false, error: '任务不存在' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message || '更新任务状态失败',
     });
   }
 });

@@ -72,6 +72,47 @@
             <span v-if="task.deadline">&#x1F4C5; {{ formatDeadline(task.deadline) }}</span>
             <span>&#x1F552; {{ formatDate(task.created_at) }}</span>
           </div>
+
+          <!-- Task Actions -->
+          <div class="task-actions" @click.stop>
+            <!-- pending: show start button -->
+            <template v-if="task.status === 'pending'">
+              <button class="btn-start" @click="startTask(task)">&#x25B6; 开始任务</button>
+            </template>
+
+            <!-- in_progress: show progress controls -->
+            <template v-else-if="task.status === 'in_progress'">
+              <div class="progress-section">
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" :style="{ width: (task.progress_percent || 0) + '%' }"></div>
+                </div>
+                <span class="progress-pct">{{ task.progress_percent || 0 }}%</span>
+              </div>
+              <div v-if="editingTaskId === task.id" class="progress-edit">
+                <div class="progress-range-row">
+                  <span>进度</span>
+                  <input type="range" min="0" max="100" step="5" v-model.number="editPercent">
+                  <span class="progress-pct">{{ editPercent }}%</span>
+                </div>
+                <input class="progress-input" type="text" v-model="editNote" placeholder="进度备注...">
+                <div class="progress-edit-actions">
+                  <button class="btn-save-progress" @click="saveProgress(task)">保存进度</button>
+                  <button class="btn-complete" @click="completeTask(task)">&#x2713; 标记完成</button>
+                  <button class="btn-cancel-edit" @click="editingTaskId = null">取消</button>
+                </div>
+              </div>
+              <div v-else class="progress-edit-actions">
+                <button class="btn-edit-progress" @click="openEdit(task)">编辑进度</button>
+                <button class="btn-complete" @click="completeTask(task)">&#x2713; 标记完成</button>
+              </div>
+            </template>
+
+            <!-- completed: show label -->
+            <template v-else-if="task.status === 'completed'">
+              <div class="completed-label">&#x2713; 已完成</div>
+              <div v-if="task.progress_note" class="completed-note">{{ task.progress_note }}</div>
+            </template>
+          </div>
         </div>
       </div>
     </div>
@@ -88,6 +129,9 @@
         const tasks = ref([]);
         const loading = ref(true);
         const activeFilter = ref('all');
+        const editingTaskId = ref(null);
+        const editPercent = ref(0);
+        const editNote = ref('');
 
         const filters = [
           { label: '全部', value: 'all' },
@@ -161,6 +205,38 @@
           }
         }
 
+        async function updateStatus(task, status, note, percent) {
+          const body = { status };
+          if (note !== undefined) body.progress_note = note;
+          if (percent !== undefined) body.progress_percent = percent;
+          await apiFetch(API_BASE + '/tasks/' + task.id + '/status', {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+          });
+          task.status = status;
+          if (note !== undefined) task.progress_note = note;
+          if (percent !== undefined) task.progress_percent = percent;
+          editingTaskId.value = null;
+        }
+
+        async function startTask(task) {
+          await updateStatus(task, 'in_progress', '', 0);
+        }
+
+        function openEdit(task) {
+          editPercent.value = task.progress_percent || 0;
+          editNote.value = task.progress_note || '';
+          editingTaskId.value = task.id;
+        }
+
+        async function saveProgress(task) {
+          await updateStatus(task, 'in_progress', editNote.value, editPercent.value);
+        }
+
+        async function completeTask(task) {
+          await updateStatus(task, 'completed', editNote.value || task.progress_note, 100);
+        }
+
         onMounted(() => {
           if (!requireAuth()) return;
           user.value = getUser();
@@ -175,6 +251,9 @@
           filters,
           filterLabel,
           filteredTasks,
+          editingTaskId,
+          editPercent,
+          editNote,
           handleLogout,
           goToDetail,
           priorityClass,
@@ -182,7 +261,11 @@
           statusClass,
           statusLabel,
           formatDeadline,
-          formatDate
+          formatDate,
+          startTask,
+          openEdit,
+          saveProgress,
+          completeTask
         };
       }
     }).mount('#app');
