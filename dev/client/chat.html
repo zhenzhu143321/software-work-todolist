@@ -27,8 +27,19 @@
         <p>用于标识任务创建人和过滤任务</p>
         <input v-model.trim="creatorName" placeholder="请输入真实姓名"
                @keydown.enter.prevent="$refs.titleInputRef?.focus()" ref="nameInputRef" maxlength="20">
-        <input v-model.trim="creatorTitle" placeholder="请输入职位（如：专业主任、教学副主任）"
-               ref="titleInputRef" @keydown.enter.prevent="confirmName" maxlength="30">
+        <select v-model="creatorTitle" ref="titleInputRef" @keydown.enter.prevent="confirmName">
+          <option value="" disabled>请选择您的职位</option>
+          <option>院长</option>
+          <option>教学副院长</option>
+          <option>院长助理</option>
+          <option>副院长</option>
+          <option>科研副院长</option>
+          <option>专业主任</option>
+          <option>专业副主任</option>
+          <option>专业教学副主任</option>
+          <option>专业科研副主任</option>
+          <option>教师</option>
+        </select>
         <button class="btn btn-primary btn-block" @click="confirmName"
                 :disabled="!creatorName || !creatorTitle">确认</button>
       </div>

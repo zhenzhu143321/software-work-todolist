@@ -1455,5 +1455,5 @@ img {
 .name-modal { background: #fff; border-radius: 12px; padding: 32px; width: 90%; max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); text-align: center; }
 .name-modal h3 { font-size: 18px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; }
 .name-modal p { font-size: 14px; color: #999; margin-bottom: 20px; }
-.name-modal input { width: 100%; padding: 10px 14px; font-size: 15px; border: 1px solid #d9d9d9; border-radius: 8px; outline: none; text-align: center; margin-bottom: 16px; transition: border-color 0.2s; }
-.name-modal input:focus { border-color: #1890ff; box-shadow: 0 0 0 3px rgba(24,144,255,0.12); }
+.name-modal input, .name-modal select { width: 100%; padding: 10px 14px; font-size: 15px; border: 1px solid #d9d9d9; border-radius: 8px; outline: none; text-align: center; margin-bottom: 16px; transition: border-color 0.2s; background: #fff; }
+.name-modal input:focus, .name-modal select:focus { border-color: #1890ff; box-shadow: 0 0 0 3px rgba(24,144,255,0.12); }
