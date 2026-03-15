@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>任务详情 - 软件学院任务系统</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/marked.min.js"></script>
+  <script src="/purify.min.js"></script>
+</head>
+<body>
+  <div id="app" v-cloak>
+    <!-- Nav Bar -->
+    <nav class="nav-bar">
+      <span class="nav-brand">软件学院任务系统</span>
+      <div class="nav-links">
+        <span class="nav-user" v-if="user">{{ user.display_name || user.username }}</span>
+        <a v-if="user && user.role === 'leader'" href="/chat.html">新建任务</a>
+        <a href="/tasks.html">任务列表</a>
+        <button class="btn-logout" @click="handleLogout">退出</button>
+      </div>
+    </nav>
+
+    <div class="container">
+      <!-- Loading -->
+      <div v-if="loading" class="loading">
+        <div class="spinner"></div>
+        <span>加载中...</span>
+      </div>
+
+      <!-- Not Found -->
+      <div v-else-if="notFound" class="empty-state">
+        <div class="empty-icon">&#x1F50D;</div>
+        <p class="empty-text">任务不存在或已被删除</p>
+        <a href="/tasks.html" class="btn btn-primary mt-16">返回任务列表</a>
+      </div>
+
+      <!-- Task Detail -->
+      <template v-else-if="task">
+        <div class="detail-header">
+          <a href="/tasks.html" class="back-btn">&#x2190; 返回</a>
+        </div>
+
+        <!-- Basic Info Card -->
+        <div class="card">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px;">
+            <h2 style="font-size:20px; font-weight:700; color:#1a1a1a; flex:1;">{{ task.title }}</h2>
+            <div style="display:flex; gap:8px; flex-shrink:0;">
+              <span class="badge" :class="priorityClass(task.priority)">{{ priorityLabel(task.priority) }}</span>
+              <span class="badge" :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h3>基本信息</h3>
+            <div class="detail-row">
+              <span class="detail-label">负责人</span>
+              <span class="detail-value">{{ task.assignee_name || '未指定' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">截止日期</span>
+              <span class="detail-value">{{ task.deadline ? formatDeadline(task.deadline) : '未设置' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">创建人</span>
+              <span class="detail-value">{{ task.creator_name || '未知' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">创建时间</span>
+              <span class="detail-value">{{ formatDate(task.created_at) }}</span>
+            </div>
+          </div>
+
+          <div class="detail-section" v-if="task.description">
+            <h3>任务描述</h3>
+            <div style="font-size:14px; color:#555; line-height:1.8;" v-html="renderMarkdown(task.description)"></div>
+          </div>
+
+          <div class="detail-section" v-if="task.acceptance_criteria">
+            <h3>验收标准</h3>
+            <div style="font-size:14px; color:#555; line-height:1.8;" v-html="renderMarkdown(task.acceptance_criteria)"></div>
+          </div>
+        </div>
+
+        <!-- Conversation Replay -->
+        <div class="card mt-16" v-if="conversation && conversation.length > 0">
+          <h3 style="font-size:16px; font-weight:600; margin-bottom:16px; color:#1a1a1a;">创建对话记录</h3>
+          <div class="conversation-replay">
+            <div
+              v-for="(msg, index) in conversation"
+              :key="index"
+              class="message"
+              :class="msg.role === 'user' ? 'user' : 'ai'"
+            >
+              <div class="message-avatar">
+                <span v-if="msg.role === 'user'">&#x1F464;</span>
+                <span v-else>AI</span>
+              </div>
+              <div class="message-content" v-if="msg.role === 'assistant'" v-html="renderMarkdown(cleanContent(msg.content))"></div>
+              <div class="message-content" v-else>{{ cleanContent(msg.content) }}</div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <script src="/vue.global.prod.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const user = ref(null);
+        const task = ref(null);
+        const conversation = ref([]);
+        const loading = ref(true);
+        const notFound = ref(false);
+
+        function handleLogout() {
+          logout();
+        }
+
+        function cleanContent(content) {
+          if (!content) return '';
+          const idx = content.indexOf('[TASK_COMPLETE]');
+          if (idx !== -1) {
+            return content.substring(0, idx).trim();
+          }
+          return content;
+        }
+
+        function renderMarkdown(text) {
+          if (!text) return '';
+          return DOMPurify.sanitize(marked.parse(text));
+        }
+
+        function priorityClass(p) {
+          const map = { high: 'badge-high', medium: 'badge-medium', low: 'badge-low' };
+          return map[p] || 'badge-medium';
+        }
+
+        function priorityLabel(p) {
+          const map = { high: '高', medium: '中', low: '低' };
+          return map[p] || p;
+        }
+
+        function statusClass(s) {
+          const map = {
+            pending: 'status-pending',
+            in_progress: 'status-in_progress',
+            completed: 'status-completed'
+          };
+          return map[s] || 'status-pending';
+        }
+
+        function statusLabel(s) {
+          const map = {
+            pending: '待处理',
+            in_progress: '进行中',
+            completed: '已完成'
+          };
+          return map[s] || s;
+        }
+
+        function formatDeadline(dateStr) {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          return d.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          });
+        }
+
+        function getTaskIdFromUrl() {
+          const params = new URLSearchParams(window.location.search);
+          return params.get('id');
+        }
+
+        async function fetchTask() {
+          const id = getTaskIdFromUrl();
+          if (!id) {
+            notFound.value = true;
+            loading.value = false;
+            return;
+          }
+
+          try {
+            const data = await apiFetch(API_BASE + '/tasks/' + id);
+
+            if (data.success && data.task) {
+              task.value = data.task;
+            } else {
+              notFound.value = true;
+              loading.value = false;
+              return;
+            }
+
+            // Parse conversation if it exists
+            if (task.value && task.value.conversation) {
+              try {
+                const parsed = typeof task.value.conversation === 'string'
+                  ? JSON.parse(task.value.conversation)
+                  : task.value.conversation;
+                conversation.value = Array.isArray(parsed) ? parsed : [];
+              } catch (e) {
+                conversation.value = [];
+              }
+            }
+          } catch (e) {
+            console.error('Failed to fetch task:', e);
+            notFound.value = true;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        onMounted(() => {
+          if (!requireAuth()) return;
+          user.value = getUser();
+          fetchTask();
+        });
+
+        return {
+          user,
+          task,
+          conversation,
+          loading,
+          notFound,
+          handleLogout,
+          cleanContent,
+          renderMarkdown,
+          priorityClass,
+          priorityLabel,
+          statusClass,
+          statusLabel,
+          formatDeadline,
+          formatDate
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

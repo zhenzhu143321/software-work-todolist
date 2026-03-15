@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 软件学院任务系统</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <div class="login-container">
+      <div class="login-card">
+        <div class="login-logo">&#x1F393;</div>
+        <h1 class="login-title">软件学院任务系统</h1>
+        <p class="login-subtitle">请登录以继续</p>
+
+        <div v-if="error" class="login-error">{{ error }}</div>
+
+        <form @submit.prevent="handleLogin">
+          <div class="form-group">
+            <label for="username">用户名</label>
+            <input
+              id="username"
+              type="text"
+              v-model.trim="username"
+              placeholder="请输入用户名"
+              autocomplete="username"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="password">密码</label>
+            <input
+              id="password"
+              type="password"
+              v-model="password"
+              placeholder="请输入密码"
+              autocomplete="current-password"
+              required
+            >
+          </div>
+
+          <button
+            type="submit"
+            class="btn btn-primary btn-block"
+            :disabled="loading"
+          >
+            <span v-if="loading">登录中...</span>
+            <span v-else>登 录</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vue.global.prod.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    const { createApp, ref } = Vue;
+
+    createApp({
+      setup() {
+        const username = ref('');
+        const password = ref('');
+        const error = ref('');
+        const loading = ref(false);
+
+        // If already logged in, redirect
+        if (getToken() && getUser()) {
+          const user = getUser();
+          redirectByRole(user.role);
+        }
+
+        function redirectByRole(role) {
+          if (role === 'leader') {
+            window.location.href = '/chat.html';
+          } else {
+            window.location.href = '/tasks.html';
+          }
+        }
+
+        async function handleLogin() {
+          if (!username.value || !password.value) {
+            error.value = '请输入用户名和密码';
+            return;
+          }
+
+          loading.value = true;
+          error.value = '';
+
+          try {
+            const data = await apiFetch(API_BASE + '/auth/login', {
+              method: 'POST',
+              body: JSON.stringify({
+                username: username.value,
+                password: password.value
+              })
+            });
+
+            if (data.token && data.user) {
+              localStorage.setItem('token', data.token);
+              localStorage.setItem('user', JSON.stringify(data.user));
+              redirectByRole(data.user.role);
+            } else if (data.error) {
+              error.value = data.error;
+            } else {
+              error.value = '登录失败，请重试';
+            }
+          } catch (e) {
+            if (e.message !== '登录已过期') {
+              error.value = '网络错误，请检查连接后重试';
+            }
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        return {
+          username,
+          password,
+          error,
+          loading,
+          handleLogin
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

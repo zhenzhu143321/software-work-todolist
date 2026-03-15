@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 对话创建任务 - 软件学院任务系统</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/marked.min.js"></script>
+  <script src="/purify.min.js"></script>
+</head>
+<body>
+  <div id="app" v-cloak>
+    <!-- Nav Bar -->
+    <nav class="nav-bar">
+      <span class="nav-brand">软件学院任务系统</span>
+      <div class="nav-links">
+        <span class="nav-user" v-if="user">{{ user.display_name || user.username }}</span>
+        <a href="/tasks.html">任务列表</a>
+        <button class="btn-logout" @click="handleLogout">退出</button>
+      </div>
+    </nav>
+
+    <!-- Name Input Modal -->
+    <div v-if="!nameConfirmed" class="name-modal-overlay">
+      <div class="name-modal">
+        <h3>请输入您的姓名</h3>
+        <p>用于标识任务创建人</p>
+        <input v-model.trim="creatorName" placeholder="请输入真实姓名"
+               @keydown.enter.prevent="confirmName" ref="nameInputRef" maxlength="20">
+        <button class="btn btn-primary btn-block" @click="confirmName" :disabled="!creatorName">确认</button>
+      </div>
+    </div>
+
+    <!-- Progress Bar -->
+    <div class="progress-bar">
+      <div
+        v-for="(step, index) in steps"
+        :key="index"
+        class="progress-step"
+        :class="{ active: currentStep === index, done: currentStep > index }"
+      >
+        <div class="step-circle">
+          <span v-if="currentStep > index">&#10003;</span>
+          <span v-else>{{ index + 1 }}</span>
+        </div>
+        <span class="step-label">{{ step }}</span>
+      </div>
+    </div>
+
+    <!-- Chat Messages -->
+    <div class="chat-container">
+      <div class="chat-messages" ref="messagesRef">
+        <template v-for="(msg, index) in messages" :key="index">
+          <div class="message" :class="msg.role === 'user' ? 'user' : 'ai'">
+            <div class="message-avatar">
+              <span v-if="msg.role === 'user'">&#x1F464;</span>
+              <span v-else>AI</span>
+            </div>
+            <div class="message-content" v-if="msg.role === 'assistant'" v-html="renderMarkdown(getMessageText(msg.content))"></div>
+            <div class="message-content" v-else>{{ getMessageText(msg.content) }}</div>
+          </div>
+          <!-- Option buttons (only for AI messages with options, only last AI msg is clickable) -->
+          <div
+            v-if="msg.role === 'assistant' && getOptions(msg.content).length > 0"
+            class="option-buttons"
+          >
+            <button
+              v-for="opt in getOptions(msg.content)"
+              :key="opt.num"
+              class="option-btn"
+              :class="{ other: opt.num === 0 }"
+              :disabled="index !== lastAiIndex || sending || taskCreated"
+              @click="handleOptionClick(opt)"
+            >{{ opt.num }}. {{ opt.text }}</button>
+          </div>
+        </template>
+
+        <!-- Typing indicator -->
+        <div v-if="sending" class="message ai">
+          <div class="message-avatar">AI</div>
+          <div class="typing-dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task Summary Card -->
+      <div v-if="taskCreated && completedTask" class="task-summary-card">
+        <div class="summary-header">&#10004; 任务创建成功</div>
+        <div class="summary-title">{{ completedTask.title }}</div>
+        <div class="summary-row">
+          <span class="summary-label">描述</span>
+          <span class="summary-value">{{ completedTask.description }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">验收标准</span>
+          <span class="summary-value">{{ completedTask.acceptance_criteria }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">截止日期</span>
+          <span class="summary-value">{{ completedTask.deadline }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">负责人</span>
+          <span class="summary-value">{{ completedTask.assignee_name }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">优先级</span>
+          <span class="summary-value">{{ priorityLabel(completedTask.priority) }}</span>
+        </div>
+        <div class="summary-actions">
+          <button class="copy-btn" :class="{ copied: copyDone }" @click="copyTask">
+            <span v-if="copyDone">&#10004; 已复制</span>
+            <span v-else>&#128203; 复制任务内容</span>
+          </button>
+          <a href="/tasks.html" class="btn">查看任务列表</a>
+        </div>
+      </div>
+
+      <!-- Fallback success banner (no task data) -->
+      <div v-if="taskCreated && !completedTask" class="success-banner" style="margin: 0 16px 12px;">
+        &#10004; 任务创建成功！<a href="/tasks.html">查看任务列表</a>
+      </div>
+
+      <!-- Chat Input -->
+      <div class="chat-input-bar" v-if="!taskCreated">
+        <textarea
+          ref="inputRef"
+          v-model="inputText"
+          @keydown.enter.exact.prevent="sendMessage"
+          placeholder="输入消息，按 Enter 发送..."
+          rows="1"
+          :disabled="sending"
+        ></textarea>
+        <button
+          class="btn-send"
+          @click="sendMessage"
+          :disabled="sending || !inputText.trim()"
+        >发送</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vue.global.prod.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    const { createApp, ref, nextTick, onMounted, computed } = Vue;
+
+    createApp({
+      setup() {
+        const user = ref(null);
+        const messages = ref([]);
+        const inputText = ref('');
+        const sending = ref(false);
+        const taskCreated = ref(false);
+        const currentStep = ref(0);
+        const messagesRef = ref(null);
+        const inputRef = ref(null);
+        const completedTask = ref(null);
+        const copyDone = ref(false);
+        const creatorName = ref(localStorage.getItem('creatorName') || '');
+        const nameConfirmed = ref(!!localStorage.getItem('creatorName'));
+        const nameInputRef = ref(null);
+
+        const steps = ['标题', '描述', '验收标准', '截止日期', '负责人', '优先级', '确认'];
+
+        // Index of the last AI message (only its options are clickable)
+        const lastAiIndex = computed(() => {
+          for (let i = messages.value.length - 1; i >= 0; i--) {
+            if (messages.value[i].role === 'assistant') return i;
+          }
+          return -1;
+        });
+
+        // Parse numbered options from AI message content
+        // Matches lines like "1. 选项文字" or "0. 其他（请说明）"
+        const optionRegex = /^(\d+)\.\s+(.+)$/;
+
+        function getOptions(content) {
+          if (!content) return [];
+          const lines = content.split('\n');
+          const opts = [];
+          for (const line of lines) {
+            const m = line.trim().match(optionRegex);
+            if (m) {
+              opts.push({ num: parseInt(m[1], 10), text: m[2].trim() });
+            }
+          }
+          return opts;
+        }
+
+        // Return message text without the option lines and without [TASK_COMPLETE] marker
+        function getMessageText(content) {
+          if (!content) return '';
+          // Remove [TASK_COMPLETE] and everything after
+          let text = content;
+          const taskIdx = text.indexOf('[TASK_COMPLETE]');
+          if (taskIdx !== -1) {
+            text = text.substring(0, taskIdx);
+          }
+          // Remove numbered option lines
+          const lines = text.split('\n');
+          const filtered = lines.filter(line => !optionRegex.test(line.trim()));
+          return filtered.join('\n').trim();
+        }
+
+        function priorityLabel(p) {
+          const map = { high: '高', medium: '中', low: '低' };
+          return map[p] || p;
+        }
+
+        function handleOptionClick(opt) {
+          if (opt.num === 0) {
+            // "Other" — focus input
+            nextTick(() => {
+              if (inputRef.value) inputRef.value.focus();
+            });
+            return;
+          }
+          // Auto-send the option number
+          inputText.value = String(opt.num);
+          sendMessage();
+        }
+
+        async function copyTask() {
+          if (!completedTask.value || copyDone.value) return;
+          const t = completedTask.value;
+          const text = [
+            '【任务】' + t.title,
+            '描述：' + t.description,
+            '验收标准：' + t.acceptance_criteria,
+            '截止日期：' + t.deadline,
+            '负责人：' + t.assignee_name,
+            '优先级：' + priorityLabel(t.priority),
+          ].join('\n');
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch (_) {
+            // fallback: textarea copy
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+          copyDone.value = true;
+          setTimeout(() => { copyDone.value = false; }, 2000);
+        }
+
+        function handleLogout() {
+          logout();
+        }
+
+        function confirmName() {
+          if (!creatorName.value) return;
+          localStorage.setItem('creatorName', creatorName.value);
+          nameConfirmed.value = true;
+          initChat();
+        }
+
+        function renderMarkdown(text) {
+          if (!text) return '';
+          return DOMPurify.sanitize(marked.parse(text));
+        }
+
+        function scrollToBottom() {
+          nextTick(() => {
+            if (messagesRef.value) {
+              messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
+            }
+          });
+        }
+
+        function updateStep() {
+          // Count user messages to estimate the current step
+          const userMsgCount = messages.value.filter(m => m.role === 'user').length;
+          currentStep.value = Math.min(userMsgCount, steps.length - 1);
+        }
+
+        async function initChat() {
+          // Send initial empty message to get AI opening prompt
+          sending.value = true;
+          try {
+            const data = await apiFetch(API_BASE + '/llm/chat', {
+              method: 'POST',
+              body: JSON.stringify({ message: '', history: [] })
+            });
+            if (data.reply) {
+              messages.value.push({ role: 'assistant', content: data.reply });
+              scrollToBottom();
+            }
+          } catch (e) {
+            messages.value.push({
+              role: 'assistant',
+              content: '连接 AI 服务失败，请刷新页面重试。'
+            });
+          } finally {
+            sending.value = false;
+          }
+        }
+
+        async function sendMessage() {
+          const text = inputText.value.trim();
+          if (!text || sending.value) return;
+
+          // Add user message
+          messages.value.push({ role: 'user', content: text });
+          inputText.value = '';
+          sending.value = true;
+          scrollToBottom();
+          updateStep();
+
+          // Build history for API (exclude the message we just added, it goes as `message`)
+          const history = messages.value.slice(0, -1).map(m => ({
+            role: m.role,
+            content: m.content
+          }));
+
+          try {
+            const data = await apiFetch(API_BASE + '/llm/chat', {
+              method: 'POST',
+              body: JSON.stringify({ message: text, history })
+            });
+
+            if (data.reply) {
+              messages.value.push({ role: 'assistant', content: data.reply });
+              scrollToBottom();
+
+              // Check for task completion marker
+              const completeIdx = data.reply.indexOf('[TASK_COMPLETE]');
+              if (completeIdx !== -1) {
+                await handleTaskComplete(data.reply.substring(completeIdx + '[TASK_COMPLETE]'.length));
+              }
+            } else if (data.error) {
+              messages.value.push({
+                role: 'assistant',
+                content: 'AI 服务出错: ' + data.error
+              });
+              scrollToBottom();
+            }
+          } catch (e) {
+            messages.value.push({
+              role: 'assistant',
+              content: '发送失败，请重试。'
+            });
+            scrollToBottom();
+          } finally {
+            sending.value = false;
+            nextTick(() => {
+              if (inputRef.value) inputRef.value.focus();
+            });
+          }
+        }
+
+        async function handleTaskComplete(jsonStr) {
+          try {
+            const taskData = JSON.parse(jsonStr.trim());
+
+            // Save for summary card display
+            completedTask.value = { ...taskData };
+
+            // Attach conversation history (as array, route will stringify)
+            taskData.conversation = messages.value;
+            taskData.creator_name = creatorName.value;
+
+            const result = await apiFetch(API_BASE + '/tasks', {
+              method: 'POST',
+              body: JSON.stringify(taskData)
+            });
+
+            if (result.success || result.task_id) {
+              currentStep.value = steps.length;
+              taskCreated.value = true;
+            } else if (result.error) {
+              completedTask.value = null;
+              messages.value.push({
+                role: 'assistant',
+                content: '任务创建失败: ' + result.error
+              });
+            }
+          } catch (e) {
+            completedTask.value = null;
+            messages.value.push({
+              role: 'assistant',
+              content: '任务数据解析失败，请重试对话。'
+            });
+          }
+          scrollToBottom();
+        }
+
+        onMounted(() => {
+          if (!requireAuth()) return;
+
+          const u = getUser();
+          if (!u || u.role !== 'leader') {
+            window.location.href = '/tasks.html';
+            return;
+          }
+          user.value = u;
+          if (nameConfirmed.value) {
+            initChat();
+          } else {
+            nextTick(() => {
+              if (nameInputRef.value) nameInputRef.value.focus();
+            });
+          }
+        });
+
+        return {
+          user,
+          messages,
+          inputText,
+          sending,
+          taskCreated,
+          currentStep,
+          steps,
+          messagesRef,
+          inputRef,
+          completedTask,
+          copyDone,
+          lastAiIndex,
+          creatorName,
+          nameConfirmed,
+          nameInputRef,
+          handleLogout,
+          sendMessage,
+          getMessageText,
+          getOptions,
+          handleOptionClick,
+          priorityLabel,
+          copyTask,
+          confirmName,
+          renderMarkdown
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
