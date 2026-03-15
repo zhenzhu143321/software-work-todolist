@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { createTask, getAllTasks, getTaskById, updateTaskStatus } from '../db.js';
+import { createTask, getAllTasks, getTaskById, updateTaskStatus, getProgressLogs } from '../db.js';
 
 const router = Router();
 
@@ -23,6 +23,7 @@ router.post('/', authenticate, requireRole('leader'), async (req, res) => {
       assignee,
       creator_name,
       conversation,
+      task_type,
     } = req.body;
 
     // Alias mapping: assignee → assignee_name, due_date → deadline
@@ -54,6 +55,7 @@ router.post('/', authenticate, requireRole('leader'), async (req, res) => {
       creator_name: creator_name || null,
       conversation: conversation ? JSON.stringify(conversation) : null,
       creator_id: req.user.id,
+      task_type: task_type === 'meeting' ? 'meeting' : 'task',
     });
 
     res.status(201).json({ success: true, task_id: taskId.id });
@@ -146,6 +148,22 @@ router.patch('/:id/status', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       error: err.message || '更新任务状态失败',
+    });
+  }
+});
+
+/**
+ * GET /api/tasks/:id/progress-logs
+ * Get progress history for a task.
+ */
+router.get('/:id/progress-logs', authenticate, async (req, res) => {
+  try {
+    const logs = getProgressLogs(req.params.id);
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message || '获取进度日志失败',
     });
   }
 });

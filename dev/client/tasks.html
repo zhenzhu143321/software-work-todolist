@@ -30,6 +30,16 @@
         >{{ f.label }}</button>
       </div>
 
+      <!-- Assignee Search + Title Filter -->
+      <div class="filter-bar" style="margin-top:-12px; margin-bottom:20px; gap:8px;">
+        <input v-model="searchText" placeholder="搜索负责人姓名..."
+               class="filter-input" style="flex:1; max-width:200px;">
+        <select v-model="titleFilter" class="filter-select">
+          <option value="">全部职位</option>
+          <option v-for="t in availableTitles" :key="t" :value="t">{{ t }}</option>
+        </select>
+      </div>
+
       <!-- Loading -->
       <div v-if="loading" class="loading">
         <div class="spinner"></div>
@@ -40,8 +50,12 @@
       <div v-else-if="filteredTasks.length === 0" class="empty-state">
         <div class="empty-icon">&#x1F4CB;</div>
         <p class="empty-text">
-          <span v-if="activeFilter === 'all'">暂无任务</span>
-          <span v-else>没有{{ filterLabel }}的任务</span>
+          <template v-if="titleFilter || searchText || activeFilter !== 'all'">
+            <span>没有匹配的任务</span>
+            <br>
+            <button class="btn" style="margin-top:8px; font-size:13px;" @click="activeFilter='all'; titleFilter=''; searchText=''">清除过滤条件</button>
+          </template>
+          <span v-else>暂无任务</span>
         </p>
       </div>
 
@@ -89,6 +103,17 @@
                 <span class="progress-pct">{{ task.progress_percent || 0 }}%</span>
               </div>
               <div v-if="editingTaskId === task.id" class="progress-edit">
+                <div v-if="showingLogsForId === task.id && progressLogs.length > 0" class="progress-timeline">
+                  <div class="timeline-title">进度记录</div>
+                  <div v-for="log in progressLogs" :key="log.id" class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                      <span class="timeline-pct">{{ log.percent }}%</span>
+                      <span class="timeline-note" v-if="log.note">{{ log.note }}</span>
+                      <span class="timeline-time">{{ formatDate(log.created_at) }}</span>
+                    </div>
+                  </div>
+                </div>
                 <div class="progress-range-row">
                   <span>进度</span>
                   <input type="range" min="0" max="100" step="5" v-model.number="editPercent">
@@ -98,7 +123,7 @@
                 <div class="progress-edit-actions">
                   <button class="btn-save-progress" @click="saveProgress(task)">保存进度</button>
                   <button class="btn-complete" @click="completeTask(task)">&#x2713; 标记完成</button>
-                  <button class="btn-cancel-edit" @click="editingTaskId = null">取消</button>
+                  <button class="btn-cancel-edit" @click="cancelEdit()">取消</button>
                 </div>
               </div>
               <div v-else class="progress-edit-actions">
@@ -132,12 +157,18 @@
         const editingTaskId = ref(null);
         const editPercent = ref(0);
         const editNote = ref('');
+        const searchText = ref('');
+        const titleFilter = ref('');
+        const progressLogs = ref([]);
+        const showingLogsForId = ref(null);
+        const logsLoading = ref(false);
 
         const filters = [
           { label: '全部', value: 'all' },
           { label: '待处理', value: 'pending' },
           { label: '进行中', value: 'in_progress' },
-          { label: '已完成', value: 'completed' }
+          { label: '已完成', value: 'completed' },
+          { label: '会议', value: 'meeting' }
         ];
 
         const filterLabel = computed(() => {
@@ -145,9 +176,48 @@
           return f ? f.label : '';
         });
 
+        const availableTitles = computed(() => {
+          const titles = new Set();
+          for (const t of tasks.value) {
+            if (t.assignee_name) {
+              if (t.assignee_name.includes('-')) {
+                titles.add(t.assignee_name.split('-')[0]);
+              } else {
+                titles.add(t.assignee_name);
+              }
+            }
+          }
+          return [...titles].sort();
+        });
+
         const filteredTasks = computed(() => {
-          if (activeFilter.value === 'all') return tasks.value;
-          return tasks.value.filter(t => t.status === activeFilter.value);
+          let list = tasks.value;
+
+          // "会议"按钮：按 task_type 过滤
+          if (activeFilter.value === 'meeting') {
+            list = list.filter(t => t.task_type === 'meeting');
+          }
+          // 状态过滤
+          else if (activeFilter.value !== 'all') {
+            list = list.filter(t => t.status === activeFilter.value);
+          }
+
+          // 职位过滤
+          if (titleFilter.value) {
+            list = list.filter(t =>
+              t.assignee_name && t.assignee_name.includes(titleFilter.value)
+            );
+          }
+
+          // 姓名搜索
+          if (searchText.value) {
+            const q = searchText.value.toLowerCase();
+            list = list.filter(t =>
+              t.assignee_name && t.assignee_name.toLowerCase().includes(q)
+            );
+          }
+
+          return list;
         });
 
         function handleLogout() {
@@ -223,14 +293,32 @@
           await updateStatus(task, 'in_progress', '', 0);
         }
 
-        function openEdit(task) {
+        async function openEdit(task) {
           editPercent.value = task.progress_percent || 0;
           editNote.value = task.progress_note || '';
           editingTaskId.value = task.id;
+          showingLogsForId.value = task.id;
+          logsLoading.value = true;
+          try {
+            const data = await apiFetch(API_BASE + '/tasks/' + task.id + '/progress-logs');
+            progressLogs.value = data.logs || [];
+          } catch (e) {
+            progressLogs.value = [];
+          } finally {
+            logsLoading.value = false;
+          }
+        }
+
+        function cancelEdit() {
+          editingTaskId.value = null;
+          showingLogsForId.value = null;
+          progressLogs.value = [];
         }
 
         async function saveProgress(task) {
           await updateStatus(task, 'in_progress', editNote.value, editPercent.value);
+          showingLogsForId.value = null;
+          progressLogs.value = [];
         }
 
         async function completeTask(task) {
@@ -251,9 +339,15 @@
           filters,
           filterLabel,
           filteredTasks,
+          availableTitles,
+          searchText,
+          titleFilter,
           editingTaskId,
           editPercent,
           editNote,
+          progressLogs,
+          showingLogsForId,
+          logsLoading,
           handleLogout,
           goToDetail,
           priorityClass,
@@ -264,6 +358,7 @@
           formatDate,
           startTask,
           openEdit,
+          cancelEdit,
           saveProgress,
           completeTask
         };

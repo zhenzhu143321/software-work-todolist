@@ -70,6 +70,25 @@ try {
   // Column already exists
 }
 
+// ── Migration: add task_type column ─────────────────────────────────────────
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'task'`);
+} catch (e) {
+  // Column already exists
+}
+
+// ── Progress logs table ─────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS progress_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    percent INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
+  );
+`);
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function hashPassword(password) {
@@ -127,8 +146,8 @@ const stmts = {
   `),
   deleteToken:      db.prepare('DELETE FROM tokens WHERE token = ?'),
   createTask:       db.prepare(`
-    INSERT INTO tasks (title, description, acceptance_criteria, deadline, priority, status, creator_id, creator_name, assignee_name, conversation)
-    VALUES (@title, @description, @acceptance_criteria, @deadline, @priority, @status, @creator_id, @creator_name, @assignee_name, @conversation)
+    INSERT INTO tasks (title, description, acceptance_criteria, deadline, priority, status, creator_id, creator_name, assignee_name, conversation, task_type)
+    VALUES (@title, @description, @acceptance_criteria, @deadline, @priority, @status, @creator_id, @creator_name, @assignee_name, @conversation, @task_type)
   `),
   getAllTasks:       db.prepare(`
     SELECT t.*, COALESCE(t.creator_name, u.display_name) AS creator_name
@@ -140,6 +159,8 @@ const stmts = {
     FROM tasks t LEFT JOIN users u ON t.creator_id = u.id
     WHERE t.id = ?
   `),
+  insertProgressLog: db.prepare('INSERT INTO progress_logs (task_id, percent, note) VALUES (?, ?, ?)'),
+  getProgressLogs:   db.prepare('SELECT id, percent, note, created_at FROM progress_logs WHERE task_id = ? ORDER BY created_at ASC'),
 };
 
 // ── Exported functions ──────────────────────────────────────────────────────
@@ -164,7 +185,7 @@ export function deleteToken(token) {
   stmts.deleteToken.run(token);
 }
 
-export function createTask({ title, description, acceptance_criteria = null, deadline = null, priority = 'medium', status = 'pending', creator_id, creator_name = null, assignee_name = null, conversation = null }) {
+export function createTask({ title, description, acceptance_criteria = null, deadline = null, priority = 'medium', status = 'pending', creator_id, creator_name = null, assignee_name = null, conversation = null, task_type = 'task' }) {
   const result = stmts.createTask.run({
     title,
     description,
@@ -176,6 +197,7 @@ export function createTask({ title, description, acceptance_criteria = null, dea
     creator_name,
     assignee_name,
     conversation,
+    task_type,
   });
   return getTaskById(result.lastInsertRowid);
 }
@@ -191,12 +213,23 @@ export function getTaskById(id) {
 export function updateTaskStatus(id, { status, progress_note, progress_percent }) {
   const task = stmts.getTaskById.get(id);
   if (!task) return null;
-  db.prepare(`
-    UPDATE tasks
-    SET status = ?, progress_note = ?, progress_percent = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(status, progress_note ?? task.progress_note, progress_percent ?? task.progress_percent, id);
+  const noteVal = progress_note ?? task.progress_note;
+  const pctVal = progress_percent ?? task.progress_percent;
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE tasks
+      SET status = ?, progress_note = ?, progress_percent = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(status, noteVal, pctVal, id);
+    if (progress_note !== undefined || progress_percent !== undefined) {
+      stmts.insertProgressLog.run(id, pctVal, noteVal);
+    }
+  })();
   return stmts.getTaskById.get(id);
+}
+
+export function getProgressLogs(taskId) {
+  return stmts.getProgressLogs.all(taskId);
 }
 
 export { hashPassword };
