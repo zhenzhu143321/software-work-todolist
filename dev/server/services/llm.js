@@ -81,9 +81,15 @@ function buildSystemPrompt() {
 ## 结束条件
 当8个要素都确认后：
 1. 用结构化格式汇总任务信息
-2. 在消息末尾单独一行输出标记和JSON：
+2. 在消息末尾单独一行输出标记，紧跟纯JSON（严格格式要求）：
 [TASK_COMPLETE]
 {"task_type":"task或meeting","title":"...","description":"...","acceptance_criteria":"...","deadline":"...","assignee_name":"...","priority":"high/medium/low"}
+
+⚠️ [TASK_COMPLETE] 格式硬性要求：
+- [TASK_COMPLETE] 后面必须紧跟纯JSON，不得有任何其他文字
+- 禁止使用 markdown 代码块（禁止 \`\`\`json ... \`\`\`）
+- 禁止在JSON前添加说明文字
+- JSON必须是单行或多行纯JSON，不得包裹在任何标记中
 
 ## 注意
 - 全程使用中文

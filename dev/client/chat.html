@@ -138,6 +138,8 @@
 
       <!-- Chat Input -->
       <div class="chat-input-bar" v-if="!taskCreated">
+        <button class="btn-reset" @click="resetChat" v-if="messages.length > 1"
+                title="放弃当前对话，重新开始">重新开始</button>
         <textarea
           ref="inputRef"
           v-model="inputText"
@@ -158,7 +160,7 @@
   <script src="/vue.global.prod.js"></script>
   <script src="/common.js"></script>
   <script>
-    const { createApp, ref, nextTick, onMounted, computed } = Vue;
+    const { createApp, ref, nextTick, onMounted, computed, watch } = Vue;
 
     createApp({
       setup() {
@@ -176,6 +178,19 @@
         const creatorTitle = ref(localStorage.getItem('creatorTitle') || '');
         const nameConfirmed = ref(!!localStorage.getItem('creatorName') && !!localStorage.getItem('creatorTitle'));
         const nameInputRef = ref(null);
+
+        // Auto-save draft to localStorage
+        watch(messages, (val) => {
+          if (val.length > 0 && !taskCreated.value) {
+            localStorage.setItem('chatDraft', JSON.stringify(val));
+          }
+        }, { deep: true });
+
+        watch(inputText, (val) => {
+          if (messages.value.length > 0 && !taskCreated.value) {
+            localStorage.setItem('chatDraftInput', val);
+          }
+        });
 
         const steps = ['类型', '标题', '描述', '验收标准', '截止日期', '负责人', '优先级', '确认'];
 
@@ -274,7 +289,7 @@
           localStorage.setItem('creatorName', creatorName.value);
           localStorage.setItem('creatorTitle', creatorTitle.value);
           nameConfirmed.value = true;
-          initChat();
+          restoreOrInit();
         }
 
         function renderMarkdown(text) {
@@ -294,6 +309,37 @@
           // Count user messages to estimate the current step
           const userMsgCount = messages.value.filter(m => m.role === 'user').length;
           currentStep.value = Math.min(userMsgCount, steps.length - 1);
+        }
+
+        function restoreOrInit() {
+          const draft = localStorage.getItem('chatDraft');
+          if (draft) {
+            try {
+              const restored = JSON.parse(draft);
+              if (Array.isArray(restored) && restored.length > 0) {
+                messages.value = restored;
+                inputText.value = localStorage.getItem('chatDraftInput') || '';
+                updateStep();
+                scrollToBottom();
+                return;
+              }
+            } catch (e) {
+              localStorage.removeItem('chatDraft');
+              localStorage.removeItem('chatDraftInput');
+            }
+          }
+          initChat();
+        }
+
+        function resetChat() {
+          messages.value = [];
+          inputText.value = '';
+          currentStep.value = 0;
+          taskCreated.value = false;
+          completedTask.value = null;
+          localStorage.removeItem('chatDraft');
+          localStorage.removeItem('chatDraftInput');
+          initChat();
         }
 
         async function initChat() {
@@ -373,7 +419,20 @@
 
         async function handleTaskComplete(jsonStr) {
           try {
-            const taskData = JSON.parse(jsonStr.trim());
+            let cleaned = jsonStr.trim();
+            // 尝试提取 markdown 代码块中的 JSON
+            const codeBlock = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (codeBlock) {
+              cleaned = codeBlock[1].trim();
+            } else {
+              // 提取第一个 { 到最后一个 } 之间的内容
+              const start = cleaned.indexOf('{');
+              const end = cleaned.lastIndexOf('}');
+              if (start !== -1 && end > start) {
+                cleaned = cleaned.substring(start, end + 1);
+              }
+            }
+            const taskData = JSON.parse(cleaned);
 
             // Save for summary card display
             completedTask.value = { ...taskData };
@@ -392,6 +451,8 @@
             if (result.success || result.task_id) {
               currentStep.value = steps.length;
               taskCreated.value = true;
+              localStorage.removeItem('chatDraft');
+              localStorage.removeItem('chatDraftInput');
             } else if (result.error) {
               completedTask.value = null;
               messages.value.push({
@@ -419,7 +480,7 @@
           }
           user.value = u;
           if (nameConfirmed.value) {
-            initChat();
+            restoreOrInit();
           } else {
             nextTick(() => {
               if (nameInputRef.value) nameInputRef.value.focus();
@@ -452,6 +513,7 @@
           priorityLabel,
           copyTask,
           confirmName,
+          resetChat,
           renderMarkdown
         };
       }
